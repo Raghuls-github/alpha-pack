@@ -42,7 +42,7 @@ def login():
 @app.get("/parcels/track")
 def track():
     code = request.args.get("code", "")
-    rows = db().execute(f"SELECT code, status, city FROM parcels WHERE code = '{code}'").fetchall()
+    rows = db().execute("SELECT code, status, city FROM parcels WHERE code = ?", (code,)).fetchall()
     return jsonify([dict(r) for r in rows])
 
 
