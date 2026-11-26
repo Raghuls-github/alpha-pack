@@ -1,0 +1,180 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Alpha Pack: Kestrel Freight's parcel label and tracking service (API host, label and
+  upload buckets, Postgres, IAM for the app and CI). Intentionally insecure demo stack.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+  AdminCidr:
+    Type: String
+    Default: 10.8.0.0/16
+    Description: Who may SSH to the API host (the corporate VPN by default)
+  AmiId:
+    Type: String
+    Default: ami-0abcdef1234567890
+  OwnerEmail:
+    Type: String
+    Default: sofia.rossi@kestrel.example
+  Repo:
+    Type: String
+    Default: github.com/Raghuls-github/alpha-pack
+
+Resources:
+  LabelsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub alpha-pack-labels-${Environment}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        IgnorePublicAcls: false
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+      Tags:
+        - { Key: app, Value: alpha-pack }
+        - { Key: owner, Value: !Ref OwnerEmail }
+        - { Key: bu, Value: logistics }
+        - { Key: env, Value: !Ref Environment }
+        - { Key: data-classification, Value: confidential }
+        - { Key: repo, Value: !Ref Repo }
+
+  LabelsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LabelsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CarriersDownloadLabels
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub arn:aws:s3:::alpha-pack-labels-${Environment}/*
+
+  UploadsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub alpha-pack-uploads-${Environment}
+      Tags:
+        - { Key: app, Value: alpha-pack }
+        - { Key: owner, Value: !Ref OwnerEmail }
+        - { Key: bu, Value: logistics }
+        - { Key: env, Value: !Ref Environment }
+        - { Key: data-classification, Value: restricted }
+        - { Key: repo, Value: !Ref Repo }
+
+  AppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub alpha-pack-api-${Environment}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: alpha-pack-app
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ["s3:*", "secretsmanager:*"]
+                Resource: "*"
+      Tags:
+        - { Key: app, Value: alpha-pack }
+        - { Key: owner, Value: !Ref OwnerEmail }
+        - { Key: bu, Value: logistics }
+        - { Key: repo, Value: !Ref Repo }
+
+  AppInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub alpha-pack-api-${Environment}
+      Roles: [!Ref AppRole]
+
+  CiUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub alpha-pack-ci-${Environment}
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Tags:
+        - { Key: app, Value: alpha-pack }
+        - { Key: owner, Value: !Ref OwnerEmail }
+        - { Key: bu, Value: logistics }
+        - { Key: purpose, Value: deploys from CI }
+        - { Key: repo, Value: !Ref Repo }
+
+  CiAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref CiUser
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub alpha-pack-api-${Environment}
+      GroupDescription: Alpha Pack API host
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: public API }
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: !Ref AdminCidr, Description: admin SSH }
+      Tags:
+        - { Key: app, Value: alpha-pack }
+        - { Key: owner, Value: !Ref OwnerEmail }
+        - { Key: bu, Value: logistics }
+
+  ApiHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: t3.medium
+      IamInstanceProfile: !Ref AppInstanceProfile
+      SecurityGroupIds: [!GetAtt AppSecurityGroup.GroupId]
+      MetadataOptions:
+        HttpTokens: optional
+        HttpEndpoint: enabled
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          git clone https://github.com/Raghuls-github/alpha-pack /srv/alpha-pack
+          cd /srv/alpha-pack && pip install -r requirements.txt
+          export CARRIER_API_KEY="ck_live_4f9a8b7c6d5e4f3a2b1c0d9e"
+          gunicorn -b 0.0.0.0:8080 app.main:app --daemon
+      Tags:
+        - { Key: Name, Value: alpha-pack-api }
+        - { Key: app, Value: alpha-pack }
+        - { Key: owner, Value: !Ref OwnerEmail }
+        - { Key: bu, Value: logistics }
+        - { Key: env, Value: !Ref Environment }
+        - { Key: internet-facing, Value: "true" }
+        - { Key: repo, Value: !Ref Repo }
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub alpha-pack-db-${Environment}
+      Engine: postgres
+      EngineVersion: "15.4"
+      DBInstanceClass: db.t3.medium
+      AllocatedStorage: "50"
+      MasterUsername: alphapack
+      MasterUserPassword: "AlphaPack#2024"
+      PubliclyAccessible: true
+      StorageEncrypted: false
+      Tags:
+        - { Key: app, Value: alpha-pack }
+        - { Key: owner, Value: !Ref OwnerEmail }
+        - { Key: bu, Value: logistics }
+        - { Key: env, Value: !Ref Environment }
+        - { Key: data-classification, Value: confidential }
+        - { Key: repo, Value: !Ref Repo }
+
+Outputs:
+  LabelsBucket:
+    Value: !Ref LabelsBucket
+  ApiHostId:
+    Value: !Ref ApiHost
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
