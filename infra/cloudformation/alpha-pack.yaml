@@ -22,15 +22,122 @@ Parameters:
     Default: github.com/Raghuls-github/alpha-pack
 
 Resources:
+  LabelsBucketKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub CMK for alpha-pack-labels-${Environment}
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AccountAdmin
+            Effect: Allow
+            Principal: { AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root" }
+            Action: kms:*
+            Resource: "*"
+          - Sid: AppUseViaS3
+            Effect: Allow
+            Principal: { AWS: !GetAtt AppRole.Arn }
+            Action: [kms:Decrypt, kms:GenerateDataKey, kms:Encrypt, kms:ReEncrypt*, kms:DescribeKey]
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+      Tags:
+        - { Key: app, Value: alpha-pack }
+        - { Key: owner, Value: !Ref OwnerEmail }
+        - { Key: bu, Value: logistics }
+        - { Key: repo, Value: !Ref Repo }
+
+  LabelsBucketKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/alpha-pack-labels-${Environment}
+      TargetKeyId: !Ref LabelsBucketKey
+
+  LabelsAccessLogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub alpha-pack-labels-logs-${Environment}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireAccessLogs
+            Status: Enabled
+            ExpirationInDays: 365
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+      Tags:
+        - { Key: app, Value: alpha-pack }
+        - { Key: owner, Value: !Ref OwnerEmail }
+        - { Key: bu, Value: logistics }
+        - { Key: env, Value: !Ref Environment }
+        - { Key: purpose, Value: access logs for LabelsBucket }
+        - { Key: repo, Value: !Ref Repo }
+
+  LabelsAccessLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LabelsAccessLogsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3ServerAccessLogsPolicy
+            Effect: Allow
+            Principal: { Service: logging.s3.amazonaws.com }
+            Action: s3:PutObject
+            Resource: !Sub arn:aws:s3:::alpha-pack-labels-logs-${Environment}/*
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Sub arn:aws:s3:::alpha-pack-labels-${Environment}
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !Sub arn:aws:s3:::alpha-pack-labels-logs-${Environment}
+              - !Sub arn:aws:s3:::alpha-pack-labels-logs-${Environment}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
   LabelsBucket:
     Type: AWS::S3::Bucket
+    DependsOn: LabelsAccessLogsBucketPolicy
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub alpha-pack-labels-${Environment}
       PublicAccessBlockConfiguration:
-        BlockPublicAcls: false
-        IgnorePublicAcls: false
-        BlockPublicPolicy: false
-        RestrictPublicBuckets: false
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt LabelsBucketKey.Arn
+            BucketKeyEnabled: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LabelsAccessLogsBucket
+        LogFilePrefix: labels/
       Tags:
         - { Key: app, Value: alpha-pack }
         - { Key: owner, Value: !Ref OwnerEmail }
@@ -46,11 +153,17 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: CarriersDownloadLabels
-            Effect: Allow
+          # Public read removed: carriers should receive pre-signed URLs from the API instead.
+          - Sid: DenyInsecureTransport
+            Effect: Deny
             Principal: "*"
-            Action: s3:GetObject
-            Resource: !Sub arn:aws:s3:::alpha-pack-labels-${Environment}/*
+            Action: s3:*
+            Resource:
+              - !Sub arn:aws:s3:::alpha-pack-labels-${Environment}
+              - !Sub arn:aws:s3:::alpha-pack-labels-${Environment}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
 
   UploadsBucket:
     Type: AWS::S3::Bucket
