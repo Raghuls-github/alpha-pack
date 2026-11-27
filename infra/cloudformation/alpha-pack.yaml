@@ -151,8 +151,22 @@ Resources:
         - { Key: internet-facing, Value: "true" }
         - { Key: repo, Value: !Ref Repo }
 
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: alpha-pack Postgres - reachable only from the API hosts
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !GetAtt AppSecurityGroup.GroupId, Description: postgres from API }
+      Tags:
+        - { Key: app, Value: alpha-pack }
+        - { Key: env, Value: !Ref Environment }
+        - { Key: repo, Value: !Ref Repo }
+
   Database:
     Type: AWS::RDS::DBInstance
+    # StorageEncrypted forces replacement: snapshot the old instance rather than drop it.
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
     Properties:
       DBInstanceIdentifier: !Sub alpha-pack-db-${Environment}
       Engine: postgres
@@ -161,8 +175,13 @@ Resources:
       AllocatedStorage: "50"
       MasterUsername: alphapack
       MasterUserPassword: "AlphaPack#2024"
-      PubliclyAccessible: true
-      StorageEncrypted: false
+      PubliclyAccessible: false
+      VPCSecurityGroups: [!GetAtt DatabaseSecurityGroup.GroupId]
+      StorageEncrypted: true
+      EnableIAMDatabaseAuthentication: true
+      EnablePerformanceInsights: true
+      BackupRetentionPeriod: 7
+      DeletionProtection: true
       Tags:
         - { Key: app, Value: alpha-pack }
         - { Key: owner, Value: !Ref OwnerEmail }
