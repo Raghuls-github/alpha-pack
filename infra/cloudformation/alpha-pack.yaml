@@ -98,13 +98,138 @@ Resources:
     Type: AWS::IAM::User
     Properties:
       UserName: !Sub alpha-pack-ci-${Environment}
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AdministratorAccess
+      # Scoped CI deploy permissions instead of AdministratorAccess.
+      Policies:
+        - PolicyName: alpha-pack-ci-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DeployAlphaPackStack
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/alpha-pack-${Environment}/*
+              - Sid: ReadOnlyCloudFormation
+                Effect: Allow
+                Action: ["cloudformation:ValidateTemplate", "cloudformation:ListStacks"]
+                Resource: "*"
+              - Sid: PassDeployRoleToCloudFormation
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/alpha-pack-cfn-deploy-${Environment}
+                Condition:
+                  StringEquals: { "iam:PassedToService": cloudformation.amazonaws.com }
       Tags:
         - { Key: app, Value: alpha-pack }
         - { Key: owner, Value: !Ref OwnerEmail }
         - { Key: bu, Value: logistics }
         - { Key: purpose, Value: deploys from CI }
+        - { Key: repo, Value: !Ref Repo }
+
+  # Service role CloudFormation assumes to apply this stack; CI can only pass it, not use it directly.
+  CfnDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub alpha-pack-cfn-deploy-${Environment}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudformation.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: alpha-pack-cfn-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AppIam
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:CreateRole
+                  - iam:UpdateRole
+                  - iam:DeleteRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:PassRole
+                  - iam:GetInstanceProfile
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:GetUser
+                  - iam:CreateUser
+                  - iam:DeleteUser
+                  - iam:TagUser
+                  - iam:UntagUser
+                  - iam:PutUserPolicy
+                  - iam:GetUserPolicy
+                  - iam:DeleteUserPolicy
+                  - iam:DetachUserPolicy
+                  - iam:ListAttachedUserPolicies
+                  - iam:ListUserPolicies
+                  - iam:CreateAccessKey
+                  - iam:DeleteAccessKey
+                  - iam:ListAccessKeys
+                  - iam:UpdateAccessKey
+                Resource:
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/alpha-pack-*
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/alpha-pack-*
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:user/alpha-pack-*
+              - Sid: AppBuckets
+                Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:DeleteBucket
+                  - s3:GetBucket*
+                  - s3:PutBucket*
+                  - s3:DeleteBucketPolicy
+                  - s3:GetEncryptionConfiguration
+                  - s3:PutEncryptionConfiguration
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:PutBucketPublicAccessBlock
+                Resource: !Sub arn:${AWS::Partition}:s3:::alpha-pack-*
+              - Sid: AppComputeAndDatabase
+                Effect: Allow
+                Action:
+                  - ec2:Describe*
+                  - ec2:RunInstances
+                  - ec2:TerminateInstances
+                  - ec2:ModifyInstanceAttribute
+                  - ec2:ModifyInstanceMetadataOptions
+                  - ec2:AssociateIamInstanceProfile
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                  - ec2:CreateSecurityGroup
+                  - ec2:DeleteSecurityGroup
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:RevokeSecurityGroupEgress
+                  - rds:Describe*
+                  - rds:CreateDBInstance
+                  - rds:ModifyDBInstance
+                  - rds:DeleteDBInstance
+                  - rds:AddTagsToResource
+                  - rds:RemoveTagsFromResource
+                  - rds:ListTagsForResource
+                Resource: "*"
+      Tags:
+        - { Key: app, Value: alpha-pack }
+        - { Key: owner, Value: !Ref OwnerEmail }
+        - { Key: bu, Value: logistics }
+        - { Key: purpose, Value: cloudformation deploy role }
         - { Key: repo, Value: !Ref Repo }
 
   CiAccessKey:
@@ -178,3 +303,6 @@ Outputs:
     Value: !Ref ApiHost
   DatabaseEndpoint:
     Value: !GetAtt Database.Endpoint.Address
+  CfnDeployRoleArn:
+    Description: Pass to `aws cloudformation deploy --role-arn` from CI
+    Value: !GetAtt CfnDeployRole.Arn
