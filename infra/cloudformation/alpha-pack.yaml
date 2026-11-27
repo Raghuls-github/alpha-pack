@@ -79,8 +79,17 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Effect: Allow
-                Action: ["s3:*", "secretsmanager:*"]
+              - Sid: WriteLabels
+                Effect: Allow
+                Action: ["s3:PutObject", "s3:PutObjectAcl"]
+                Resource: !Sub "${LabelsBucket.Arn}/*"
+              - Sid: WriteUploads
+                Effect: Allow
+                Action: ["s3:PutObject"]
+                Resource: !Sub "${UploadsBucket.Arn}/*"
+              - Sid: Secrets
+                Effect: Allow
+                Action: ["secretsmanager:*"]
                 Resource: "*"
       Tags:
         - { Key: app, Value: alpha-pack }
