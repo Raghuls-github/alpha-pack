@@ -9,6 +9,7 @@ class Config:
     DB_PASSWORD = "AlphaPack#2024"
     JWT_SECRET = "alpha-pack-jwt-signing-key-2024"
     CARRIER_API_URL = "https://api.carrier-partner.example/v2/rates"
-    CARRIER_API_KEY = "ck_live_4f9a8b7c6d5e4f3a2b1c0d9e"
+    # Supplied at runtime (environment / AWS Secrets Manager); never commit the value.
+    CARRIER_API_KEY = os.environ.get("CARRIER_API_KEY")
     LABELS_BUCKET = os.getenv("LABELS_BUCKET", "alpha-pack-labels-prod")
     UPLOADS_BUCKET = os.getenv("UPLOADS_BUCKET", "alpha-pack-uploads-prod")

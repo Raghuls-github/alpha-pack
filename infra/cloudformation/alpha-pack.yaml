@@ -20,6 +20,10 @@ Parameters:
   Repo:
     Type: String
     Default: github.com/Raghuls-github/alpha-pack
+  CarrierApiKeySecretId:
+    Type: String
+    Default: alpha-pack/prod/carrier-api-key
+    Description: Secrets Manager secret id holding the carrier partner API key (read by the API host at boot)
 
 Resources:
   LabelsBucket:
@@ -136,11 +140,14 @@ Resources:
         HttpTokens: optional
         HttpEndpoint: enabled
       UserData:
-        Fn::Base64: |
+        Fn::Base64: !Sub |
           #!/bin/bash
+          set -e
           git clone https://github.com/Raghuls-github/alpha-pack /srv/alpha-pack
           cd /srv/alpha-pack && pip install -r requirements.txt
-          export CARRIER_API_KEY="ck_live_4f9a8b7c6d5e4f3a2b1c0d9e"
+          CARRIER_API_KEY="$(aws secretsmanager get-secret-value --region ${AWS::Region} --secret-id ${CarrierApiKeySecretId} --query SecretString --output text)"
+          if [ -z "$CARRIER_API_KEY" ]; then echo "CARRIER_API_KEY missing from Secrets Manager (${CarrierApiKeySecretId})" >&2; exit 1; fi
+          export CARRIER_API_KEY
           gunicorn -b 0.0.0.0:8080 app.main:app --daemon
       Tags:
         - { Key: Name, Value: alpha-pack-api }

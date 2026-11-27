@@ -70,6 +70,8 @@ def me():
 
 @app.get("/carriers/rates")
 def rates():
+    if not Config.CARRIER_API_KEY:
+        raise RuntimeError("CARRIER_API_KEY is not set; provide it via the environment or the secret store")
     r = requests.get(Config.CARRIER_API_URL, params={"to": request.args.get("to")},
                      headers={"Authorization": f"Bearer {Config.CARRIER_API_KEY}"}, verify=False, timeout=10)
     return r.json()
